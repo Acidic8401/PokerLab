@@ -26,3 +26,19 @@
 .seat-card-back{position:relative;border:1.5px solid #d0d9c6!important;background:repeating-linear-gradient(45deg,#152b1d 0,#152b1d 4px,#466746 4px,#466746 8px)!important;box-shadow:0 2px 5px #0009,inset 0 0 0 2px #1a2419,inset 0 0 0 3px #8fa783!important}
 .seat-card-back .back-center-mark{width:17px;height:17px;font-size:11px}
 @media(max-width:760px){.board-area .asset-card-index>b{font-size:17px}.board-area .asset-card-index>i{font-size:13px}.seat-cards .table-card{flex-basis:40px;width:40px;height:56px}.seat-cards .asset-card-index>b{font-size:15px}}
+/* Larger cards use the asset artwork's own rank and suit indexes. */
+.board-area .playing-card,.board-card-back{flex-basis:64px;width:64px;height:90px}
+.board-cards{min-height:90px;gap:6px}
+.seat-cards .table-card,.seat-cards>.seat-card-back{flex-basis:56px;width:56px;height:79px}
+.seat-cards{min-height:83px;gap:4px}
+.playing-card.small-card{flex-basis:33px;width:33px;height:47px}
+@media(max-width:760px){.board-area .playing-card,.board-card-back{flex-basis:54px;width:54px;height:76px}.board-cards{min-height:76px}.seat-cards .table-card,.seat-cards>.seat-card-back{flex-basis:46px;width:46px;height:65px}.playing-card.small-card{flex-basis:29px;width:29px;height:41px}}
+/* The hero and board cards are intentionally twice the standard table-card size. */
+.board-area{width:min(96%,760px)}
+.board-area .playing-card,.board-card-back{flex-basis:128px;width:128px;height:180px}
+.board-cards{min-height:180px;gap:6px}
+.table-seat.seat-hero{top:83%!important;width:248px}
+.seat-hero .seat-info{width:142px}
+.seat-hero .seat-cards{min-height:158px;gap:4px}
+.seat-hero .seat-cards .table-card{flex-basis:112px;width:112px;height:158px}
+@media(max-width:760px){.board-area{width:min(98%,760px)}.board-area .playing-card,.board-card-back{flex-basis:96px;width:96px;height:135px}.board-cards{min-height:135px}.table-seat.seat-hero{top:80%!important;width:210px}.seat-hero .seat-info{width:120px}.seat-hero .seat-cards{min-height:135px}.seat-hero .seat-cards .table-card{flex-basis:96px;width:96px;height:135px}}

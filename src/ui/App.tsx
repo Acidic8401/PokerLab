@@ -5,7 +5,7 @@ import { deriveHandAccounting } from '../accounting'
 import { calculateShowdownEquity, parseCardList, type EquityResult } from '../pokerMath'
 import { deleteAllHands, getHands, getHandTags, isDesktopRuntime, removeHandTag, saveHandTag, saveHands } from '../storage'
 
-const cardAssetUrls = import.meta.glob('./assets/cards/*.svg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
+const cardAssetUrls = import.meta.glob('./assets/cards/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
 
 type Nav = 'Overview' | 'Hands' | 'Tournaments' | 'Import' | 'Settings'
 const nav = [{ label: 'Overview', icon: Grid2X2 }, { label: 'Hands', icon: Spade }, { label: 'Tournaments', icon: Activity }, { label: 'Import', icon: Upload }, { label: 'Settings', icon: Settings2 }] as const
@@ -409,8 +409,8 @@ function PlayingCard({ code, small = false, table = false }: { code: string; sma
     h: { glyph: '♥', name: 'hearts', red: true }, s: { glyph: '♠', name: 'spades', red: false },
   }
   const suit = suits[suitCode]
-  const imageUrl = cardAssetUrls[`./assets/cards/${suitCode.toUpperCase()}-${rank}.svg`]
-  return <span className={`playing-card ${small ? 'small-card' : ''} ${table ? 'table-card' : ''}`} role="img" aria-label={suit ? `${rank} of ${suit.name}` : `Unknown card ${code}`}>{imageUrl ? <><img src={imageUrl} alt="" draggable={false}/><span className={`asset-card-index ${suit?.red ? 'asset-card-red' : ''}`}><b>{rank}</b><i>{suit?.glyph ?? '?'}</i></span></> : <span className="playing-card-fallback">{rank}{suit?.glyph ?? '?'}</span>}</span>
+  const imageUrl = cardAssetUrls[`./assets/cards/${suitCode.toUpperCase()}-${rank}.png`]
+  return <span className={`playing-card ${small ? 'small-card' : ''} ${table ? 'table-card' : ''}`} role="img" aria-label={suit ? `${rank} of ${suit.name}` : `Unknown card ${code}`}>{imageUrl ? <img src={imageUrl} alt="" draggable={false}/> : <span className="playing-card-fallback">{rank}{suit?.glyph ?? '?'}</span>}</span>
 }
 function PlayingCardBack({ className }: { className: string }) { return <span className={className} aria-label="Face-down card"><span className="back-center-mark">♠</span></span> }
 function EmptyState({onImport,title='No hands to show',body='Import a hand history to start building your library.'}:{onImport:()=>void;title?:string;body?:string}) {return <div className="empty-state"><div className="empty-icon"><Spade size={22}/></div><b>{title}</b><p>{body}</p><button className="secondary-btn" onClick={onImport}><Upload size={14}/> Import a hand history</button></div>}
