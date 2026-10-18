@@ -7,8 +7,33 @@ export type ImportDiagnostic = { severity: 'warning' | 'error'; message: string;
 export type Street = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown' | 'other'
 export type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'post_blind' | 'post_ante' | 'collect' | 'show' | 'other'
 export type HandAction = { sequence: number; street: Street; player: string | null; actionType: ActionType; amount: number | null; amountTo: number | null; sourceText: string }
+export type HandTag = { handId: string; name: string; color: string; createdAt: string }
 export type HandPlayer = { name: string; seat: number; position: string | null; startingStack: number | null; holeCards: string[] | null; shownCards: string[] | null; isHero: boolean }
 export type Hand = { id: string; site: Site; sourceHandId: string | null; tournamentId: string | null; tournamentName: string | null; buyInMinor: number | null; feeMinor: number | null; currency: string | null; tableName: string | null; playedAt: string | null; smallBlind: number | null; bigBlind: number | null; ante: number | null; buttonSeat: number | null; heroCards: string[] | null; position: string | null; resultChips: number | null; boardCards: string[]; players: HandPlayer[]; actions: HandAction[]; rawText: string; rawTextHash: string; parserName: string; parserVersion: string; parseStatus: ParseStatus; warnings: string[] }
+/** Recover exposed cards from already-imported hand histories created by older parsers. */
+export function recoverShownCards(hand: Hand): Hand {
+  const shown = new Map<string, string[]>()
+  const showLines = new Map<string, { player: string; cards: string[] }>()
+  for (const line of hand.rawText.split(/\r?\n/)) {
+    const match = line.trim().match(/^(.+?)\s+shows?\s*\[\s*([^\]]+?)\s*\]\s*$/i)
+    if (!match) continue
+    const player = hand.players.find(candidate => candidate.name === match[1])
+    const cards = match[2].split(',').map(card => card.trim()).filter(Boolean)
+    if (player && cards.length === 2) { shown.set(player.name, cards); showLines.set(line.trim(), { player: player.name, cards }) }
+  }
+  const actions = hand.actions.map(action => {
+    const recovered = showLines.get(action.sourceText.trim())
+    return recovered ? { ...action, player: recovered.player, actionType: 'show' as const, amount: null, amountTo: null } : action
+  })
+  for (const [sourceText, recovered] of showLines) {
+    if (!actions.some(action => action.sourceText.trim() === sourceText)) {
+      const street: Street = hand.boardCards.length >= 5 ? 'river' : hand.boardCards.length === 4 ? 'turn' : hand.boardCards.length === 3 ? 'flop' : 'showdown'
+      actions.push({ sequence: actions.length, street, player: recovered.player, actionType: 'show', amount: null, amountTo: null, sourceText })
+    }
+  }
+  if (!shown.size && actions.length === hand.actions.length) return hand
+  return { ...hand, players: hand.players.map(player => shown.has(player.name) ? { ...player, shownCards: shown.get(player.name)! } : player), actions: actions.map((action, sequence) => ({ ...action, sequence })) }
+}
 const nullableText = z.string().nullable()
 const nullableInteger = z.number().int().nonnegative().nullable()
 export const HandSchema = z.object({
@@ -24,11 +49,11 @@ export const HandSchema = z.object({
 }) satisfies z.ZodType<Hand>
 export type ParseResult = { site: Site; parserName: string; parserVersion: string; hands: Hand[]; diagnostics: ImportDiagnostic[]; unsupported: boolean; failedCount: number }
 
-const parserVersion = '1.1.0'
+const parserVersion = '1.2.0'
 const handStart = /^#Game No\s*:\s*(\d+)\s*$/m
 const money = (value: string | undefined): number | null => value == null ? null : Number(value.replaceAll(',', ''))
 const cards = (value: string): string[] => value.split(',').map((card) => card.trim()).filter(Boolean)
-const actionPattern = /^(.+?) (posts ante|posts small blind|posts big blind|folds|checks|calls|bets|raises|collected|shows|mucks|did not show his hand)(?: \[([^\]]+)\])?$/
+const actionPattern = /^(.+?)\s+(posts ante|posts small blind|posts big blind|folds|checks|calls|bets|raises|collected|shows?|mucks|did not show his hand)(?:\s*\[([^\]]+)\])?\s*$/i
 
 function toMinorUnits(value: string | undefined): number | null {
   if (!value) return null
@@ -39,12 +64,28 @@ function toMinorUnits(value: string | undefined): number | null {
   return Number.isSafeInteger(cents) ? cents : null
 }
 
+function parseEntryComponents(priceText: string) {
+  const amounts = priceText.split('+').map(part => part.trim())
+  const values = amounts.map(part => toMinorUnits(part.replace(/[$€£]/g, '').trim()))
+  if (!values.length || values.some(value => value === null)) return null
+  const currencies = [...priceText.matchAll(/[$€£]/g)].map(match => match[0])
+  const currency = currencies[0] ?? null
+  if (currencies.some(value => value !== currency)) return null
+  const normalizedValues = values as number[]
+  return { buyInMinor: normalizedValues.slice(0, -1).reduce((sum, value) => sum + value, normalizedValues.length === 1 ? normalizedValues[0] : 0), feeMinor: normalizedValues.length > 1 ? normalizedValues.at(-1)! : 0, currency }
+}
+
 function fileTournamentMetadata(fileName: string | undefined) {
-  if (!fileName) return { tournamentName: null, buyInMinor: null, feeMinor: null, currency: null }
+  const empty = { tournamentName: null, buyInMinor: null, feeMinor: null, currency: null }
+  if (!fileName) return empty
   const baseName = fileName.split(/[\\/]/).at(-1)?.replace(/\.[^.]+$/, '') ?? fileName
-  const match = baseName.match(/Tournament\s+([$€£])\s*([\d,]+(?:\.\d{1,2})?)\s*\+\s*([$€£])?\s*([\d,]+(?:\.\d{1,2})?)\s+(.+?)\s+\((\d+)\)\s+.+$/i)
-  if (!match) return { tournamentName: null, buyInMinor: null, feeMinor: null, currency: null }
-  return { tournamentName: match[5].trim(), buyInMinor: toMinorUnits(match[2]), feeMinor: toMinorUnits(match[4]), currency: match[3] && match[3] !== match[1] ? null : match[1] }
+  const match = baseName.match(/Tournament\s+((?:[$€£]\s*[\d,]+(?:\.\d{1,2})?)(?:\s*\+\s*(?:[$€£]\s*)?[\d,]+(?:\.\d{1,2})?)*)\s+(.+?)\s+\((\d+)\)\s+.+$/i)
+  if (match) {
+    const amounts = parseEntryComponents(match[1])
+    if (amounts) return { tournamentName: match[2].trim(), ...amounts }
+  }
+  if (/\bfree[ -]?roll\b/i.test(baseName)) return { tournamentName: baseName, buyInMinor: 0, feeMinor: 0, currency: null }
+  return empty
 }
 
 function positionBySeat(players: HandPlayer[], buttonSeat: number | null): Map<number, string> {
@@ -83,11 +124,12 @@ function parse888Hand(raw: string, lineOffset: number, fileMetadata: ReturnType<
   const tournamentLine = lines.find((line) => /^Tournament #/.test(line))
   const tournamentId = tournamentLine?.match(/^Tournament #(\d+)/)?.[1] ?? null
   const tableMatch = tournamentLine?.match(/- Table #([^ ]+)/)
-  const priceMatch = tournamentLine?.match(/Tournament #\d+\s+([$€£])\s*([\d,]+(?:\.\d{1,2})?)\s*\+\s*([$€£])?\s*([\d,]+(?:\.\d{1,2})?)/)
-  const headerCurrency = priceMatch && priceMatch[3] && priceMatch[1] !== priceMatch[3] ? null : priceMatch?.[1] ?? null
-  const buyInMinor = priceMatch ? toMinorUnits(priceMatch[2]) : fileMetadata.buyInMinor
-  const feeMinor = priceMatch ? toMinorUnits(priceMatch[4]) : fileMetadata.feeMinor
-  const currency = headerCurrency ?? fileMetadata.currency
+  const priceMatch = tournamentLine?.match(/Tournament #\d+\s+((?:[$€£]\s*[\d,]+(?:\.\d{1,2})?)(?:\s*\+\s*(?:[$€£]\s*)?[\d,]+(?:\.\d{1,2})?)*)/)
+  const headerAmounts = priceMatch ? parseEntryComponents(priceMatch[1]) : null
+  const amounts = fileMetadata.buyInMinor !== null ? fileMetadata : headerAmounts ?? fileMetadata
+  const buyInMinor = amounts.buyInMinor
+  const feeMinor = amounts.feeMinor
+  const currency = amounts.currency
   const seats = new Map<string, HandPlayer>()
   for (const line of lines) {
     const seat = line.match(/^Seat (\d+): (.+?) \(\s*([\d,]+)\s*\)$/)
@@ -120,7 +162,7 @@ function parse888Hand(raw: string, lineOffset: number, fileMetadata: ReturnType<
       const collect = line.match(/^First runout (.+?) collected \[ ([\d,]+) \]$/)
       if (collect) {
         actions.push({ sequence: actions.length, street: 'showdown', player: collect[1], actionType: 'collect', amount: money(collect[2]), amountTo: null, sourceText: line })
-        if (collect[1] === heroName) resultChips = money(collect[2])
+        if (collect[1] === heroName) resultChips = (resultChips ?? 0) + (money(collect[2]) ?? 0)
       } else diagnostics.push({ severity: 'warning', message: 'Unrecognized runout summary line.', line: lineOffset + i })
       continue
     }
@@ -129,20 +171,20 @@ function parse888Hand(raw: string, lineOffset: number, fileMetadata: ReturnType<
       diagnostics.push({ severity: 'warning', message: 'Unrecognized line in hand block; it was retained in the source text.', line: lineOffset + i })
       continue
     }
-    const [, player, verb, rawAmount] = action
+    const [, player, rawVerb, rawAmount] = action
+    const verb = rawVerb.toLowerCase()
     if (!seats.has(player)) diagnostics.push({ severity: 'warning', message: 'An action refers to a player missing from the seat list.', line: lineOffset + i })
     let actionType: ActionType
     if (verb === 'posts ante') { actionType = 'post_ante'; ante = money(rawAmount) }
     else if (verb === 'posts small blind' || verb === 'posts big blind') actionType = 'post_blind'
-    else if (verb === 'did not show his hand' || verb === 'mucks') actionType = 'show'
-    else if (verb === 'shows') actionType = 'show'
+    else if (verb === 'did not show his hand' || verb === 'mucks' || verb === 'show' || verb === 'shows') actionType = 'show'
     else if (verb === 'collected') actionType = 'collect'
     else actionType = verb.replace(/s$/, '') as ActionType
-    const shownCards = (verb === 'shows' || verb === 'mucks') && rawAmount ? cards(rawAmount) : null
+    const shownCards = (verb === 'shows' || verb === 'show' || verb === 'mucks') && rawAmount ? cards(rawAmount) : null
     if (shownCards?.length && seats.has(player)) seats.get(player)!.shownCards = shownCards
-    const numeric = verb === 'shows' || verb === 'mucks' || verb === 'did not show his hand' ? null : money(rawAmount)
+    const numeric = verb === 'shows' || verb === 'show' || verb === 'mucks' || verb === 'did not show his hand' ? null : money(rawAmount)
     actions.push({ sequence: actions.length, street: street === 'preflop' && (actionType === 'collect' || actionType === 'show') ? 'showdown' : street, player, actionType, amount: numeric, amountTo: actionType === 'raise' ? numeric : null, sourceText: line })
-    if (verb === 'collected' && player === heroName) resultChips = numeric
+    if (verb === 'collected' && player === heroName) resultChips = (resultChips ?? 0) + (numeric ?? 0)
   }
   if (!heroCards) diagnostics.push({ severity: 'warning', message: 'Hero cards were not present in this hand.', line: lineOffset })
   const warnings = diagnostics.map((d) => d.message)

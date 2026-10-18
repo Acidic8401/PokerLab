@@ -12,6 +12,11 @@ pub fn run() {
         description: "index hands by date",
         sql: "CREATE INDEX IF NOT EXISTS hands_played_at_idx ON hands(played_at)",
         kind: MigrationKind::Up,
+    }, Migration {
+        version: 3,
+        description: "store colored hand tags",
+        sql: "CREATE TABLE IF NOT EXISTS hand_tags (hand_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (hand_id, name), FOREIGN KEY (hand_id) REFERENCES hands(id) ON DELETE CASCADE)",
+        kind: MigrationKind::Up,
     }];
 
     tauri::Builder::default()
